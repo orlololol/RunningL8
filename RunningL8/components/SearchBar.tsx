@@ -25,10 +25,19 @@ import ApiService, { LocationData } from '../services/ApiService';
 // ];
 
 interface SearchBarProps {
-  onLocationSelect?: (destination: string, currentLocation: string) => void;
+  onLocationSelect?: (
+    destination: string, 
+    currentLocation: string, 
+    destinationDetails?: LocationData, 
+    originDetails?: LocationData
+  ) => void;
+  userLocation?: { latitude: number, longitude: number } | null;
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect }) => {
+const SearchBar: React.FC<SearchBarProps> = ({ 
+  onLocationSelect,
+  userLocation 
+}) => {
   const [destinationText, setDestinationText] = useState('');
   const [currentLocationText, setCurrentLocationText] = useState('Current Position');
   const [isExpanded, setIsExpanded] = useState(false);
@@ -127,7 +136,12 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect }) => {
     
     try {
       setIsLoading(true);
-      const results = await ApiService.searchLocations(query);
+      // Pass current coordinates for location bias
+      const results = await ApiService.searchLocations(
+        query, 
+        userLocation?.latitude, 
+        userLocation?.longitude
+      );
       setSearchResults(results);
     } catch (error) {
       console.error('Error searching locations:', error);
@@ -143,19 +157,66 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect }) => {
     }
   };
 
-  const handleLocationSelect = (item: LocationData) => {
-    if (isDestinationFocused) {
-      setDestinationText(item.place);
-    } else if (isCurrentLocationFocused) {
-      setCurrentLocationText(item.place);
+  const handleLocationSelect = async (item: LocationData) => {
+    try {
+      // Show loading state
+      setIsLoading(true);
+      
+      // Store which input is being filled
+      const isDestination = isDestinationFocused;
+      
+      console.log("🔍 Getting details for selected location:", item.id);
+      
+      // Get complete location details including coordinates
+      const details = await ApiService.getPlaceDetails(item.id);
+      
+      if (!details) {
+        console.error('Could not get location details');
+        setIsLoading(false);
+        return;
+      }
+      
+      console.log('📍 Got location details with coordinates:', {
+        lat: details.latitude,
+        lng: details.longitude
+      });
+      
+      // Update the text field with the selected place
+      if (isDestination) {
+        setDestinationText(details.place);
+      } else {
+        setCurrentLocationText(details.place);
+      }
+      
+      // Clear search
+      setSearchQuery('');
+      setSearchResults([]);
+      
+      // Dismiss keyboard
+      Keyboard.dismiss();
+      
+      // Auto-collapse the search bar
+      setShowRecommendations(false);
+      
+      // Set confirmed to prevent collapsing the search bar
+      setIsConfirmed(true);
+      
+      // IMPORTANT: Immediately call the parent with location details
+      // This will trigger marker placement and route calculation right away
+      if (onLocationSelect) {
+        console.log("📢 Immediately passing location details to parent");
+        onLocationSelect(
+          details.place,
+          isDestination ? currentLocationText : details.place,
+          isDestination ? details : undefined,
+          isDestination ? undefined : details
+        );
+      }
+    } catch (error) {
+      console.error('Error in handleLocationSelect:', error);
+    } finally {
+      setIsLoading(false);
     }
-    
-    // Clear search
-    setSearchQuery('');
-    setSearchResults([]);
-    
-    // Dismiss keyboard
-    Keyboard.dismiss();
   };
 
   const handleDestinationFocus = () => {
@@ -200,16 +261,15 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect }) => {
     setShowRecommendations(false);
     Keyboard.dismiss();
     
-    // Validate that we have input before calling onLocationSelect
-    if (destinationText.trim() === '') {
-      setDestinationText('Destination'); // Set a default if empty
-    }
-    
-    // Call the parent component with the selected locations
-    if (onLocationSelect) {
+    // If no selection has been made from search results,
+    // handle it as a manual entry
+    if (onLocationSelect && destinationText) {
+      console.log("🔍 Manual confirm with text input:", destinationText);
       onLocationSelect(
         destinationText.trim() || 'Destination', 
-        currentLocationText.trim() || 'Current Position'
+        currentLocationText.trim() || 'Current Position',
+        undefined, // No coordinates available from manual text entry
+        undefined
       );
     }
   };

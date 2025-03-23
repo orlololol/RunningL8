@@ -201,7 +201,7 @@ const apiService = {
         console.log(`✅ Success with endpoint: ${endpoint}`);
         console.log("✅ Response received:", JSON.stringify(response.data, null, 2));
         return this.parseRouteResponse(response.data);
-      } catch (error) {
+      } catch (error: any) {
         lastError = error;
         console.error(`❌ Error with endpoint ${endpoint}:`, error.message);
         
@@ -321,17 +321,27 @@ const apiService = {
   
   /**
    * Search for locations using Google Places Autocomplete API
+   * @param query Search query
+   * @param lat Current latitude for location bias
+   * @param lng Current longitude for location bias
    */
-  async searchLocations(query: string): Promise<LocationData[]> {
+  async searchLocations(query: string, lat?: number, lng?: number): Promise<LocationData[]> {
     if (!query || query.trim() === '') {
       return [];
     }
     
     try {
-      // This uses the Google Places API directly from the client
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${API_CONFIG.GOOGLE_PLACES_API_KEY}&types=geocode`
-      );
+      // Build URL with location bias parameters if coordinates are provided
+      let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${API_CONFIG.GOOGLE_PLACES_API_KEY}&types=geocode`;
+      
+      // Add location bias if coordinates are available
+      if (lat && lng) {
+        url += `&location=${lat},${lng}&radius=50000`; // 50km radius
+        console.log("🌎 Using location bias for search:", lat, lng);
+      }
+      
+      console.log("🔍 Search URL:", url);
+      const response = await fetch(url);
       
       const data = await response.json();
       
@@ -345,8 +355,8 @@ const apiService = {
         id: prediction.place_id || `location-${index}`,
         place: prediction.structured_formatting?.main_text || prediction.description,
         address: prediction.structured_formatting?.secondary_text || '',
-        latitude: 0, // These would need to be populated with a follow-up API call
-        longitude: 0, // to get detailed place information including coordinates
+        latitude: 0, // These will be populated when a location is selected
+        longitude: 0,
       }));
     } catch (error) {
       console.error('Error searching locations:', error);
@@ -359,8 +369,11 @@ const apiService = {
    */
   async getPlaceDetails(placeId: string): Promise<LocationData | null> {
     try {
+      console.log("🔍 Getting place details for ID:", placeId);
+      
+      // Use the fields parameter to request all needed data
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,formatted_address,name&key=${API_CONFIG.GOOGLE_PLACES_API_KEY}`
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,formatted_address,name,vicinity&key=${API_CONFIG.GOOGLE_PLACES_API_KEY}`
       );
       
       const data = await response.json();
@@ -370,10 +383,15 @@ const apiService = {
         return null;
       }
       
+      console.log("✅ Got place details with coordinates:", {
+        lat: data.result.geometry?.location?.lat,
+        lng: data.result.geometry?.location?.lng
+      });
+      
       return {
         id: placeId,
-        place: data.result.name,
-        address: data.result.formatted_address,
+        place: data.result.name || "Selected Location",
+        address: data.result.formatted_address || data.result.vicinity || "",
         latitude: data.result.geometry?.location?.lat || 0,
         longitude: data.result.geometry?.location?.lng || 0,
       };

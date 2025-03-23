@@ -91,6 +91,14 @@ export default function App() {
 
   const handleMapPress = (event: MapPressEvent) => {
     const { coordinate } = event.nativeEvent;
+    console.log("🖱️ Map pressed at:", coordinate);
+    
+    // Clear previous marker and route data
+    setDestinationCoords(null);
+    setRouteCoordinates([]);
+    setRouteData(null);
+    
+    // Set new marker
     setMarkerLocation(coordinate);
   };
 
@@ -99,15 +107,27 @@ export default function App() {
   };
 
   const handleBottomButtonPress = () => {
+    console.log("👍 Continue button pressed");
+    
     // If marker location exists, use it to set destination
     if (markerLocation && location) {
+      // Set destination coordinates - this will be used for the red marker
       setDestinationCoords(markerLocation);
+      
+      // Set start coordinates from current location
       setStartCoords({
         latitude: location.latitude,
         longitude: location.longitude
       });
       
+      // Clear the marker now that we have set destination coords
+      // This prevents having both a temp marker and destination marker
+      setMarkerLocation(null);
+      
+      console.log("📍 Set destination at:", markerLocation);
+      
       // Fetch route between current location and selected marker
+      console.log("🔄 Fetching route data...");
       fetchRouteData(
         location.latitude,
         location.longitude,
@@ -171,6 +191,9 @@ export default function App() {
     console.log(`- Start: ${startLat}, ${startLng}`);
     console.log(`- End: ${endLat}, ${endLng}`);
     
+    // Clear any previous route
+    setRouteCoordinates([]);
+    
     try {
       // Create route request
       const routeRequest = {
@@ -181,10 +204,6 @@ export default function App() {
       };
       
       console.log("📤 Requesting route with data:", JSON.stringify(routeRequest, null, 2));
-      
-      // Try direct axios request to bypass potential issues in the service
-      // This is a hackathon-specific approach for debugging
-      console.log("⏳ Calling ApiService.getGenericRoute...");
       
       // Add a timeout promise to prevent long-hanging requests
       const timeoutPromise = new Promise<RouteData>((_, reject) => {
@@ -208,13 +227,17 @@ export default function App() {
           const decodedCoords = decodePolyline(data.polyline);
           
           if (decodedCoords && decodedCoords.length > 0) {
-            console.log("✅ Setting route coordinates from polyline");
+            console.log("✅ Setting route coordinates from polyline, points:", decodedCoords.length);
             setRouteCoordinates(decodedCoords);
             return;
+          } else {
+            console.warn("⚠️ Decoded polyline had no points");
           }
         } catch (err) {
           console.error("❌ Error decoding polyline:", err);
         }
+      } else {
+        console.warn("⚠️ No polyline in response data");
       }
       
       // Fall back to fake route
@@ -225,13 +248,21 @@ export default function App() {
       );
       setRouteCoordinates(fakeRoute);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Error in fetchRouteData:", error);
       console.error("❌ Error message:", error.message);
       
-      // If we have any route data from a previous successful request, try to use that
+      // Always provide a route visualization
+      console.log("🛣️ Creating fake route path due to error");
+      const fakeRoute = createFakeRoutePath(
+        { latitude: startLat, longitude: startLng },
+        { latitude: endLat, longitude: endLng }
+      );
+      
+      setRouteCoordinates(fakeRoute);
+      
+      // If we don't have route data, create default data
       if (!routeData) {
-        // Create a default routeData object for the UI
         const defaultRouteData = {
           distance: calculateDistance(startLat, startLng, endLat, endLng),
           duration: 30, // Default 30 min
@@ -242,15 +273,6 @@ export default function App() {
         
         setRouteData(defaultRouteData);
       }
-      
-      // Always provide a route visualization
-      console.log("🛣️ Creating fake route path due to error");
-      const fakeRoute = createFakeRoutePath(
-        { latitude: startLat, longitude: startLng },
-        { latitude: endLat, longitude: endLng }
-      );
-      
-      setRouteCoordinates(fakeRoute);
     }
   };
   
@@ -303,54 +325,97 @@ export default function App() {
     return deg * (Math.PI / 180);
   };
 
-  const handleLocationSelect = async (destination: string, originLocation: string, destinationDetails?: LocationData, originDetails?: LocationData) => {
+  const handleLocationSelect = async (
+    destination: string, 
+    originLocation: string, 
+    destinationDetails?: LocationData, 
+    originDetails?: LocationData
+  ) => {
+    console.log("🔍 Location selected from search:", {
+      destination,
+      destinationDetails: destinationDetails ? 
+        `${destinationDetails.place} (${destinationDetails.latitude}, ${destinationDetails.longitude})` : 
+        'undefined',
+      originLocation,
+      originDetails: originDetails ? 
+        `${originDetails.place} (${originDetails.latitude}, ${originDetails.longitude})` : 
+        'undefined'
+    });
+    
     setDestination(destination);
     setCurrentLocation(originLocation);
     
-    // If we received location details with coordinates, use them
-    if (destinationDetails?.latitude && destinationDetails?.longitude) {
-      setDestinationCoords({
-        latitude: destinationDetails.latitude,
-        longitude: destinationDetails.longitude
-      });
-    } else {
-      // If coordinates weren't provided, clear destination coords
-      setDestinationCoords(null);
+    // Always clear any temporary marker when selecting from search
+    setMarkerLocation(null);
+    
+    // If no coordinates are provided, do nothing else
+    if (!destinationDetails?.latitude && !originDetails?.latitude) {
+      console.log("⚠️ No coordinates provided in search selection");
+      return;
     }
     
-    // Set origin coordinates (either from location details or current GPS position)
+    // If we received destination details with coordinates, update destination marker
+    if (destinationDetails?.latitude && destinationDetails?.longitude) {
+      const coords = {
+        latitude: destinationDetails.latitude,
+        longitude: destinationDetails.longitude
+      };
+      
+      console.log("📍 Setting destination marker from search at:", coords);
+      setDestinationCoords(coords);
+    }
+    
+    // Set origin coordinates (from either location details or current GPS position)
     if (originDetails?.latitude && originDetails?.longitude) {
       setStartCoords({
         latitude: originDetails.latitude,
         longitude: originDetails.longitude
       });
+      console.log("📍 Set origin from search selection:", originDetails.place);
     } else if (location && originLocation === 'Current Position') {
       setStartCoords({
         latitude: location.latitude,
         longitude: location.longitude
       });
-    } else {
-      setStartCoords(null);
+      console.log("📍 Set origin from current GPS position");
     }
     
-    // If we have both coordinates, fetch the route
-    if (
-      (destinationDetails?.latitude || destinationCoords) && 
-      (originDetails?.latitude || location || startCoords)
-    ) {
-      const destLat = destinationDetails?.latitude || destinationCoords?.latitude || 0;
-      const destLng = destinationDetails?.longitude || destinationCoords?.longitude || 0;
-      const startLat = originDetails?.latitude || startCoords?.latitude || location?.latitude || 0;
-      const startLng = originDetails?.longitude || startCoords?.longitude || location?.longitude || 0;
+    // IMMEDIATE ROUTE GENERATION:
+    // If we have both coordinates, fetch the route immediately
+    if (destinationDetails?.latitude && destinationDetails?.longitude) {
+      const startLat = originDetails?.latitude || location?.latitude || 0;
+      const startLng = originDetails?.longitude || location?.longitude || 0;
+      const destLat = destinationDetails.latitude;
+      const destLng = destinationDetails.longitude;
       
-      // Only fetch if we have valid coordinates
-      if (destLat && destLng && startLat && startLng) {
+      if (startLat !== 0 && startLng !== 0) {
+        console.log("🛣️ Immediately fetching route between:", 
+          { start: {lat: startLat, lng: startLng}, 
+            dest: {lat: destLat, lng: destLng} });
+        
+        // Immediately fetch route without waiting for Confirm button
         await fetchRouteData(startLat, startLng, destLat, destLng);
+        
+        // Move map to show both points
+        if (mapRef.current) {
+          // Calculate region that includes both points
+          const region = {
+            latitude: (startLat + destLat) / 2,
+            longitude: (startLng + destLng) / 2,
+            latitudeDelta: Math.abs(startLat - destLat) * 1.5 + 0.02,
+            longitudeDelta: Math.abs(startLng - destLng) * 1.5 + 0.02
+          };
+          
+          console.log("🗺️ Animating map to show route");
+          mapRef.current.animateToRegion(region, 1000);
+        }
+        
+        // Show the ETA panel
+        setShowEtaPanel(true);
+      } else {
+        console.warn("⚠️ Missing start coordinates, cannot generate route");
       }
     }
-    
-    // Show the ETA panel
-    setShowEtaPanel(true);
   };
 
   const handleCloseEtaPanel = () => {
@@ -527,6 +592,14 @@ export default function App() {
     }
   };
 
+  // Add this useEffect to ensure markers behave correctly
+  useEffect(() => {
+    // If we have a destination marker, always clear the temporary marker
+    if (destinationCoords) {
+      setMarkerLocation(null);
+    }
+  }, [destinationCoords]);
+
   if (errorMsg) {
     return (
       <View style={styles.container}>
@@ -560,12 +633,23 @@ export default function App() {
         onPress={handleMapPress}
         moveOnMarkerPress={false}
       >
-        {markerLocation && (
+        {/* Only show temporary marker if no destination set */}
+        {markerLocation && !destinationCoords && (
           <Marker
             coordinate={markerLocation}
             onPress={handleMarkerPress}
             title="Selected Location"
             description="Tap to remove"
+            pinColor="#FFA500" // Orange for temporary marker
+          />
+        )}
+        
+        {/* Destination marker always has priority and is always red */}
+        {destinationCoords && (
+          <Marker
+            coordinate={destinationCoords}
+            title={destination || 'Destination'}
+            pinColor="#FF6B6B" // Always red for destination
           />
         )}
         
@@ -588,15 +672,6 @@ export default function App() {
             strokeColor="#ff6b6b"
           />
         )}
-        
-        {/* Destination marker */}
-        {destinationCoords && (
-          <Marker
-            coordinate={destinationCoords}
-            title={destination || 'Destination'}
-            pinColor="#FF6B6B"
-          />
-        )}
       </MapView>
       
       {markerLocation && (
@@ -614,6 +689,7 @@ export default function App() {
       {!isNavigating && (
         <SearchBar 
           onLocationSelect={handleLocationSelect}
+          userLocation={location}
         />
       )}
       

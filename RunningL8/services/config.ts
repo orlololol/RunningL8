@@ -1,13 +1,11 @@
 // API Configuration
 export const API_CONFIG = {
-  // Production backend URL
+  // Backend URL
   BASE_URL: 'http://138.197.155.224:8080/api',
-  TIMEOUT: 10000, // 10 seconds
+  TIMEOUT: 15000, // 15 seconds timeout - longer for hackathon conditions
   
-  // Google Places API key - replace with your actual key
-  // For development, you can hardcode it here, but for production
-  // use environment variables
-  GOOGLE_PLACES_API_KEY: 'AIzaSyDrSO3955VyJY7HOmBfTrVXMhjoY5qDDIk', 
+  // This is used for Google Places API
+  GOOGLE_PLACES_API_KEY: 'AIzaSyDrSO3955VyJY7HOmBfTrVXMhjoY5qDDIk', // Replace with your actual key
 };
 
 // Replace 'YOUR_GOOGLE_PLACES_API_KEY' with your actual Google Places API key
