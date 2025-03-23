@@ -1,193 +1,259 @@
 import axios from 'axios';
+import { API_CONFIG } from './config';
 
-// Base URL for the Spring Boot backend
-// TODO: Replace with your actual backend URL
-const API_BASE_URL = 'http://localhost:8080/api';
+// Configure axios instance
+const api = axios.create({
+  baseURL: API_CONFIG.BASE_URL,
+  timeout: API_CONFIG.TIMEOUT,
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  }
+});
 
-// Interface for location data
+// ---------- Interfaces for Data Structures ----------
+
 export interface LocationData {
   id: string;
   place: string;
   address: string;
-  frequency: number;
-  latitude?: number;
-  longitude?: number;
+  latitude: number;
+  longitude: number;
 }
 
-// Interface for route data
+// ---------- Interfaces for Requests ----------
+
+// For routing using detailed info
+export interface RouteRequest {
+  currentLat: number;
+  currentLng: number;
+  destinationLat: number;
+  destinationLng: number;
+  distance?: string;
+  neededArrivalTime?: string;
+}
+
+// For generic routing (minimal lat/lng data)
+export interface GenericRouteRequest {
+  currentLat: number;
+  currentLng: number;
+  destinationLat: number;
+  destinationLng: number;
+}
+
+// For starting a run
+export interface StartRunRequest {
+  originLat: number;
+  originLng: number;
+  destinationLat: number;
+  destinationLng: number;
+  distance: string;
+  neededArrivalTime: string;
+}
+
+// For ending a run
+export interface EndRunRequest {
+  timeFinished: Date | string;
+}
+
+// ---------- Interfaces for Responses ----------
+
 export interface RouteData {
-  distance: number;        // in kilometers
-  duration: number;        // in minutes
-  startLocation: LocationData;
-  endLocation: LocationData;
-  polyline?: string;       // encoded polyline for route
-  trafficCondition?: 'light' | 'moderate' | 'heavy';
+  distance: number;
+  duration: number;
+  polyline: string;
+  startLocation: {
+    latitude: number;
+    longitude: number;
+  };
+  endLocation: {
+    latitude: number;
+    longitude: number;
+  };
 }
 
-// Interface for weather data
 export interface WeatherData {
-  temperature: number;     // in Celsius
-  condition: string;       // e.g., "Sunny", "Rainy", etc.
-  icon: string;            // icon name or code
-  impact: string;          // e.g., "Good conditions for your trip"
+  temperature: number;
+  condition: string;
+  icon: string;
+  impact: string;
 }
 
-/**
- * Service for all API calls to the backend
- */
-class ApiService {
-  /**
-   * Get recent destinations for the user
-   * @param userId The ID of the user
-   * @returns Promise with array of recent locations
-   */
-  async getRecentDestinations(userId: string): Promise<LocationData[]> {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/users/${userId}/recent-destinations`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching recent destinations:', error);
-      return [];
-    }
-  }
+// ---------- API Service Class ----------
+const apiService = {
+  // ---------------- Route Endpoints ----------------
 
   /**
-   * Get suggested destinations based on user history and preferences
-   * @param userId The ID of the user
-   * @returns Promise with array of suggested locations
+   * Gets a route based on start and end coordinates
    */
-  async getSuggestedDestinations(userId: string): Promise<LocationData[]> {
+  async getRoute(request: RouteRequest): Promise<RouteData> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/users/${userId}/suggested-destinations`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching suggested destinations:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Save a destination to user history
-   * @param userId The ID of the user
-   * @param location The location data to save
-   * @returns Promise with saved location data
-   */
-  async saveDestination(userId: string, location: Partial<LocationData>): Promise<LocationData> {
-    try {
-      const response = await axios.post(`${API_BASE_URL}/users/${userId}/destinations`, location);
-      return response.data;
-    } catch (error) {
-      console.error('Error saving destination:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get route information between two locations
-   * @param startLat Starting latitude
-   * @param startLng Starting longitude
-   * @param endLat Ending latitude
-   * @param endLng Ending longitude
-   * @returns Promise with route data
-   */
-  async getRoute(startLat: number, startLng: number, endLat: number, endLng: number): Promise<RouteData> {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/routes`, {
-        params: {
-          startLat,
-          startLng,
-          endLat,
-          endLng,
-        },
-      });
-      return response.data;
+      const response = await api.post('/route', request);
+      return this.parseRouteResponse(response.data);
     } catch (error) {
       console.error('Error fetching route:', error);
       throw error;
     }
-  }
+  },
 
   /**
-   * Get weather information for a location
-   * @param lat Latitude
-   * @param lng Longitude
-   * @returns Promise with weather data
+   * Gets a generic route based on basic latitude and longitude information
    */
-  async getWeather(lat: number, lng: number): Promise<WeatherData> {
+  async getGenericRoute(request: GenericRouteRequest): Promise<RouteData> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/weather`, {
-        params: {
-          lat,
-          lng,
-        },
-      });
-      return response.data;
+      const response = await api.post('/route/generic', request);
+      return this.parseRouteResponse(response.data);
     } catch (error) {
-      console.error('Error fetching weather:', error);
+      console.error('Error fetching generic route:', error);
       throw error;
     }
-  }
+  },
 
   /**
-   * Search for locations by query text
-   * @param query The search query
-   * @returns Promise with array of matching locations
+   * Parse Google route response into our format
+   */
+  parseRouteResponse(data: any): RouteData {
+    try {
+      // Parse the Google Maps API response
+      const routes = data.routes || [];
+      if (routes.length === 0) {
+        throw new Error('No routes found');
+      }
+      
+      const route = routes[0];
+      const legs = route.legs || [];
+      if (legs.length === 0) {
+        throw new Error('No route legs found');
+      }
+      
+      const leg = legs[0];
+      
+      // Get total distance in meters, convert to kilometers
+      const distanceMeters = leg.steps.reduce((total: number, step: any) => 
+        total + (step.distanceMeters || 0), 0);
+      
+      // Estimate duration based on walking speed (5 km/h)
+      const distanceKm = distanceMeters / 1000;
+      const durationMinutes = Math.round((distanceKm / 5) * 60);
+      
+      return {
+        distance: distanceKm,
+        duration: durationMinutes,
+        polyline: route.polyline?.encodedPolyline || '',
+        startLocation: {
+          latitude: leg.startLocation?.latLng?.latitude || 0,
+          longitude: leg.startLocation?.latLng?.longitude || 0,
+        },
+        endLocation: {
+          latitude: leg.endLocation?.latLng?.latitude || 0,
+          longitude: leg.endLocation?.latLng?.longitude || 0,
+        }
+      };
+    } catch (error) {
+      console.error('Error parsing route response:', error);
+      return {
+        distance: 0,
+        duration: 0,
+        polyline: '',
+        startLocation: { latitude: 0, longitude: 0 },
+        endLocation: { latitude: 0, longitude: 0 }
+      };
+    }
+  },
+
+  // ---------------- Location Search (Google Places API) ----------------
+  
+  /**
+   * Search for locations using Google Places Autocomplete API
    */
   async searchLocations(query: string): Promise<LocationData[]> {
+    if (!query || query.trim() === '') {
+      return [];
+    }
+    
     try {
-      const response = await axios.get(`${API_BASE_URL}/locations/search`, {
-        params: {
-          query,
-        },
-      });
-      return response.data;
+      // This uses the Google Places API directly from the client
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${API_CONFIG.GOOGLE_PLACES_API_KEY}&types=geocode`
+      );
+      
+      const data = await response.json();
+      
+      if (data.status !== 'OK') {
+        console.warn(`Places API error: ${data.status}`);
+        return [];
+      }
+      
+      // Convert Google Places predictions to LocationData format
+      return data.predictions.map((prediction: any, index: number) => ({
+        id: prediction.place_id || `location-${index}`,
+        place: prediction.structured_formatting?.main_text || prediction.description,
+        address: prediction.structured_formatting?.secondary_text || '',
+        latitude: 0, // These would need to be populated with a follow-up API call
+        longitude: 0, // to get detailed place information including coordinates
+      }));
     } catch (error) {
       console.error('Error searching locations:', error);
       return [];
     }
-  }
+  },
 
   /**
-   * Get ETA based on average speed
-   * @param distance Distance in kilometers
-   * @returns Promise with ETA in minutes
+   * Get detailed location information from a place_id
    */
-  async getAverageEta(distance: number): Promise<number> {
+  async getPlaceDetails(placeId: string): Promise<LocationData | null> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/eta/average`, {
-        params: {
-          distance,
-        },
-      });
-      return response.data.eta;
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,formatted_address,name&key=${API_CONFIG.GOOGLE_PLACES_API_KEY}`
+      );
+      
+      const data = await response.json();
+      
+      if (data.status !== 'OK' || !data.result) {
+        console.warn(`Place details API error: ${data.status}`);
+        return null;
+      }
+      
+      return {
+        id: placeId,
+        place: data.result.name,
+        address: data.result.formatted_address,
+        latitude: data.result.geometry?.location?.lat || 0,
+        longitude: data.result.geometry?.location?.lng || 0,
+      };
     } catch (error) {
-      console.error('Error fetching average ETA:', error);
-      // Fallback calculation (20 km/h average)
-      return Math.round((distance / 20) * 60);
+      console.error('Error fetching place details:', error);
+      return null;
     }
-  }
+  },
+
+  // ---------------- Run Endpoints ----------------
 
   /**
-   * Calculate required speed to reach destination in given time
-   * @param distance Distance in kilometers
-   * @param timeMinutes Time in minutes
-   * @returns Promise with required speed in km/h
+   * Starts a new run
    */
-  async getRequiredSpeed(distance: number, timeMinutes: number): Promise<number> {
+  async startRun(request: StartRunRequest): Promise<any> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/eta/required-speed`, {
-        params: {
-          distance,
-          timeMinutes,
-        },
-      });
-      return response.data.requiredSpeed;
+      const response = await api.post('/run/start', request);
+      return response.data;
     } catch (error) {
-      console.error('Error calculating required speed:', error);
-      // Fallback calculation
-      return Math.round((distance / (timeMinutes / 60)) * 10) / 10;
+      console.error('Error starting run:', error);
+      throw error;
     }
-  }
-}
+  },
 
-export default new ApiService(); 
+  /**
+   * Ends a run and logs its finish time
+   */
+  async endRun(request: EndRunRequest): Promise<any> {
+    try {
+      const response = await api.post('/run/end', request);
+      return response.data;
+    } catch (error) {
+      console.error('Error ending run:', error);
+      throw error;
+    }
+  },
+};
+
+export default apiService;

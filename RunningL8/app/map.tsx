@@ -21,7 +21,7 @@ export default function App() {
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
   const [showEtaPanel, setShowEtaPanel] = useState(false);
   const [routeData, setRouteData] = useState<RouteData | null>(null);
-  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
+  //const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
   
   // Navigation mode states
@@ -60,9 +60,9 @@ export default function App() {
           setLocation(location.coords);
           
           // Get weather data for current location
-          if (location.coords.latitude && location.coords.longitude) {
-            fetchWeatherData(location.coords.latitude, location.coords.longitude);
-          }
+          // if (location.coords.latitude && location.coords.longitude) {
+          //   fetchWeatherData(location.coords.latitude, location.coords.longitude);
+          // }
         }
       } catch (error) {
         if (isMounted) {
@@ -229,68 +229,60 @@ export default function App() {
     }
   };
   
-  // Fetch weather data from API
-  const fetchWeatherData = async (latitude: number, longitude: number) => {
-    try {
-      const data = await ApiService.getWeather(latitude, longitude);
-      setWeatherData(data);
-    } catch (error) {
-      console.error('Error fetching weather data:', error);
-    }
-  };
+  // Fetch weather data from API WE do not have this feature yet
+  // const fetchWeatherData = async (latitude: number, longitude: number) => {
+  //   try {
+  //     const data = await ApiService.getWeather(latitude, longitude);
+  //     setWeatherData(data);
+  //   } catch (error) {
+  //     console.error('Error fetching weather data:', error);
+  //   }
+  // };
   
   // Fetch route data from API
   const fetchRouteData = async (startLat: number, startLng: number, endLat: number, endLng: number) => {
     try {
-      const data = await ApiService.getRoute(startLat, startLng, endLat, endLng);
-      setRouteData(data);
-      
-      // For demo purposes - in a real app, you would decode polyline from the API response
-      // This creates a mockup route between points
-      const fakePath = createFakeRoutePath(
-        { latitude: startLat, longitude: startLng },
-        { latitude: endLat, longitude: endLng },
-      );
-      setRouteCoordinates(fakePath);
-      
-      return data;
-    } catch (error) {
-      console.error('Error fetching route data:', error);
-      // Generate fallback route data
-      const distance = calculateDistance(startLat, startLng, endLat, endLng);
-      const dummyRouteData: RouteData = {
-        distance: distance,
-        duration: Math.round((distance / 20) * 60), // Assuming 20 km/h average speed
-        startLocation: {
-          id: 'start',
-          place: currentLocation || 'Current Position',
-          address: 'Starting Point',
-          frequency: 0,
-          latitude: startLat,
-          longitude: startLng,
-        },
-        endLocation: {
-          id: 'end',
-          place: destination || 'Destination',
-          address: 'End Point',
-          frequency: 0,
-          latitude: endLat,
-          longitude: endLng,
-        },
-        trafficCondition: 'moderate',
+      // Create route request
+      const routeRequest = {
+        currentLat: startLat,
+        currentLng: startLng,
+        destinationLat: endLat,
+        destinationLng: endLng
       };
       
-      setRouteData(dummyRouteData);
-      setDistanceLeft(distance);
+      // Call the API service with the proper request format
+      const data = await ApiService.getGenericRoute(routeRequest);
+      setRouteData(data);
       
-      // Generate fake route path for visualization
-      const fakePath = createFakeRoutePath(
+      // If no polyline from API or API call failed, create a fake route path
+      if (!data || !data.polyline) {
+        const fakeRoute = createFakeRoutePath(
+          { latitude: startLat, longitude: startLng },
+          { latitude: endLat, longitude: endLng }
+        );
+        
+        setRouteCoordinates(fakeRoute);
+      } else {
+        // In real implementation, decode the polyline from the API
+        // This is placeholder code until you implement polyline decoding
+        const fakeRoute = createFakeRoutePath(
+          { latitude: startLat, longitude: startLng },
+          { latitude: endLat, longitude: endLng }
+        );
+        
+        setRouteCoordinates(fakeRoute);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching route:', error);
+      
+      // Fallback to fake route path
+      const fakeRoute = createFakeRoutePath(
         { latitude: startLat, longitude: startLng },
-        { latitude: endLat, longitude: endLng },
+        { latitude: endLat, longitude: endLng }
       );
-      setRouteCoordinates(fakePath);
       
-      return dummyRouteData;
+      setRouteCoordinates(fakeRoute);
     }
   };
   
@@ -518,7 +510,6 @@ export default function App() {
       {!isNavigating && (
         <SearchBar 
           onLocationSelect={handleLocationSelect}
-          userId={USER_ID}
         />
       )}
       

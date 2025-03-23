@@ -116,7 +116,7 @@ Returns information about a route between two points.
 
 Returns weather information for a specific location.
 
-- **URL**: `/weather`
+<!-- - **URL**: `/weather`
 - **Method**: `GET`
 - **Query Parameters**:
   - `lat=[number]` - Latitude
@@ -129,7 +129,7 @@ Returns weather information for a specific location.
     "icon": "partly-sunny",
     "impact": "Good conditions for your trip"
   }
-  ```
+  ``` --> 
 
 ### Location Search
 

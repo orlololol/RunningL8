@@ -26,14 +26,12 @@ const EXAMPLE_HISTORY = [
 
 interface SearchBarProps {
   onLocationSelect?: (destination: string, currentLocation: string) => void;
-  userId?: string; // User ID for API calls
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user123" }) => {
+const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect }) => {
   const [destinationText, setDestinationText] = useState('');
   const [currentLocationText, setCurrentLocationText] = useState('Current Position');
   const [isExpanded, setIsExpanded] = useState(false);
-  const [recentLocations, setRecentLocations] = useState<LocationData[]>(EXAMPLE_HISTORY);
   const [isDestinationFocused, setIsDestinationFocused] = useState(false);
   const [isCurrentLocationFocused, setIsCurrentLocationFocused] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(false);
@@ -49,11 +47,6 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user1
   
   // Search debounce timer
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
-  
-  // Fetch recent destinations when component mounts
-  useEffect(() => {
-    fetchRecentDestinations();
-  }, [userId]);
   
   // Animation effect for expanding/collapsing
   useEffect(() => {
@@ -128,23 +121,6 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user1
     };
   }, [searchQuery]);
 
-  // Fetch recent destinations from API
-  const fetchRecentDestinations = async () => {
-    try {
-      setIsLoading(true);
-      const data = await ApiService.getRecentDestinations(userId);
-      if (data && data.length > 0) {
-        setRecentLocations(data);
-      }
-    } catch (error) {
-      console.error('Error fetching recent destinations:', error);
-      // Fall back to example data if API fails
-      setRecentLocations(EXAMPLE_HISTORY);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
   // Search for locations by query
   const searchLocations = async (query: string) => {
     if (!query.trim()) return;
@@ -170,8 +146,6 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user1
   const handleLocationSelect = (item: LocationData) => {
     if (isDestinationFocused) {
       setDestinationText(item.place);
-      // Save selection to recent destinations
-      saveDestination(item);
     } else if (isCurrentLocationFocused) {
       setCurrentLocationText(item.place);
     }
@@ -183,25 +157,6 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user1
     // Dismiss keyboard
     Keyboard.dismiss();
   };
-  
-  // Save a selected destination to history
-  const saveDestination = async (location: LocationData) => {
-    try {
-      await ApiService.saveDestination(userId, location);
-      // Refresh recent destinations to include the newly added one
-      fetchRecentDestinations();
-    } catch (error) {
-      console.error('Error saving destination:', error);
-    }
-  };
-
-  // Sort locations by frequency (for recent locations)
-  const sortedLocations = [...recentLocations].sort((a, b) => b.frequency - a.frequency);
-  
-  // Determine which locations to show (search results or recent locations)
-  const locationsToDisplay = searchQuery && searchResults.length > 0 
-    ? searchResults 
-    : sortedLocations;
 
   const handleDestinationFocus = () => {
     setIsDestinationFocused(true);
@@ -349,23 +304,23 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user1
         </TouchableOpacity>
       )}
 
-      {/* Recommendations */}
+      {/* Places Autocomplete Results */}
       {(showRecommendations && isExpanded) && (
         <View style={styles.recommendationsContainer}>
           {/* Title changes based on search context */}
           <Text style={styles.recentHeader}>
             {searchQuery 
               ? `Results for "${searchQuery}"` 
-              : 'Recent Places'}
+              : 'Nearby Places'}
           </Text>
           
           {isLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#2089dc" />
             </View>
-          ) : locationsToDisplay.length > 0 ? (
+          ) : searchResults.length > 0 ? (
             <FlatList
-              data={locationsToDisplay}
+              data={searchResults}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <TouchableOpacity 
@@ -373,7 +328,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user1
                   onPress={() => handleLocationSelect(item)}
                 >
                   <Ionicons 
-                    name={searchQuery ? "navigate-outline" : "time-outline"} 
+                    name="navigate-outline" 
                     size={20} 
                     color="#888" 
                     style={styles.itemIcon} 
@@ -390,7 +345,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onLocationSelect, userId = "user1
               <Text style={styles.emptyResultsText}>
                 {searchQuery 
                   ? 'No locations found. Try a different search term.' 
-                  : 'No recent places yet.'}
+                  : 'Type to search for places.'}
               </Text>
             </View>
           )}

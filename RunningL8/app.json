@@ -11,8 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "config": {
-        "googleMapsApiKey":  "process.env.GOOGLE_MAPS_API_KEY"
-        }
+        "googleMapsApiKey": "process.env.GOOGLE_MAPS_API_KEY"
+      }
     },
     "android": {
       "config": {
@@ -50,7 +50,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
