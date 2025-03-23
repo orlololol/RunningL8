@@ -17,12 +17,12 @@ import { Ionicons } from '@expo/vector-icons';
 import ApiService, { LocationData } from '../services/ApiService';
 
 // Temporary example history until connected to backend
-const EXAMPLE_HISTORY = [
-  { id: '1', place: 'Home', address: '123 Main St', frequency: 10 },
-  { id: '2', place: 'Work', address: '456 Office Blvd', frequency: 8 },
-  { id: '3', place: 'Gym', address: '789 Fitness Ave', frequency: 5 },
-  { id: '4', place: 'Coffee Shop', address: '321 Brew St', frequency: 3 },
-];
+// const EXAMPLE_HISTORY = [
+//   { id: '1', place: 'Home', address: '123 Main St', frequency: 10 },
+//   { id: '2', place: 'Work', address: '456 Office Blvd', frequency: 8 },
+//   { id: '3', place: 'Gym', address: '789 Fitness Ave', frequency: 5 },
+//   { id: '4', place: 'Coffee Shop', address: '321 Brew St', frequency: 3 },
+// ];
 
 interface SearchBarProps {
   onLocationSelect?: (destination: string, currentLocation: string) => void;
