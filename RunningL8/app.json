@@ -26,8 +26,10 @@
       },
       "permissions": [
         "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
-      ]
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
+      "package": "com.orlolol.RunningL8"
     },
     "web": {
       "bundler": "metro",
@@ -55,6 +57,14 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "489b93d1-d7d3-4b10-9ccb-c65027aa68f5"
+      }
     }
   }
 }

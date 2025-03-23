@@ -73,6 +73,9 @@ const NavigationPanel: React.FC<NavigationPanelProps> = ({
   const currentPanelHeight = useRef(panelHeightMiddle);
   const splitsScrollViewRef = useRef<ScrollView>(null);
 
+  // Add a pulse animation for the "Calculating..." text
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  
   // Pan responder for drag gestures
   const panResponder = useRef(
     PanResponder.create({
@@ -185,6 +188,30 @@ const NavigationPanel: React.FC<NavigationPanelProps> = ({
     return () => clearInterval(timer);
   }, [elapsedTime]);
 
+  // Set up pulse animation
+  useEffect(() => {
+    // Only run animation when pace is being calculated
+    if (pace === '--:-- min/km') {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.7,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      // Stop animation when pace is calculated
+      pulseAnim.setValue(1);
+    }
+  }, [pace]);
+
   const slides = [
     {
       id: 'eta',
@@ -257,8 +284,17 @@ const NavigationPanel: React.FC<NavigationPanelProps> = ({
       <View style={styles.paceContainer}>
         <Text style={styles.paceLabel}>Current Pace</Text>
         <View style={styles.paceValueContainer}>
-          <Ionicons name="speedometer-outline" size={28} color="#333" style={styles.paceIcon} />
-          <Text style={styles.paceValue}>{pace}</Text>
+          <Ionicons 
+            name="speedometer-outline" 
+            size={28} 
+            color="#333" 
+            style={styles.paceIcon} 
+          />
+          <View style={styles.paceTextContainer}>
+            <Text style={styles.paceValue}>{pace}</Text>
+            {/* Always show "current pace" indicator */}
+            <Text style={styles.paceSubtext}>current pace</Text>
+          </View>
         </View>
       </View>
 
@@ -442,6 +478,21 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
+  paceCalculating: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 5,
+  },
+  paceInstructionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 5,
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 15,
+  },
   carouselContainer: {
     marginBottom: 15,
     paddingHorizontal: 20,
@@ -538,6 +589,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginLeft: 5,
+  },
+  paceTextContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paceSubtext: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
   },
 });
 

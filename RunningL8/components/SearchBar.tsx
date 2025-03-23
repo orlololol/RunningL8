@@ -32,11 +32,13 @@ interface SearchBarProps {
     originDetails?: LocationData
   ) => void;
   userLocation?: { latitude: number, longitude: number } | null;
+  onClear?: () => void;
 }
 
 const SearchBar: React.FC<SearchBarProps> = ({ 
   onLocationSelect,
-  userLocation 
+  userLocation,
+  onClear
 }) => {
   const [destinationText, setDestinationText] = useState('');
   const [currentLocationText, setCurrentLocationText] = useState('Current Position');
@@ -181,8 +183,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
         lng: details.longitude
       });
       
-      // Update the text field with the selected place
+      // Update the text field with the complete place name
       if (isDestination) {
+        // Ensure we use the full text that comes from the API
         setDestinationText(details.place);
       } else {
         setCurrentLocationText(details.place);
@@ -256,32 +259,176 @@ const SearchBar: React.FC<SearchBarProps> = ({
     }
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
+    // Show loading state
+    setIsLoading(true);
     setIsConfirmed(true);
     setShowRecommendations(false);
     Keyboard.dismiss();
     
-    // If no selection has been made from search results,
-    // handle it as a manual entry
-    if (onLocationSelect && destinationText) {
-      console.log("🔍 Manual confirm with text input:", destinationText);
-      onLocationSelect(
-        destinationText.trim() || 'Destination', 
-        currentLocationText.trim() || 'Current Position',
-        undefined, // No coordinates available from manual text entry
-        undefined
-      );
+    try {
+      // If a destination was typed but not selected from results, geocode it
+      if (destinationText && destinationText.trim() !== '') {
+        console.log("🔍 Geocoding manually entered text:", destinationText);
+        
+        // First try to search for the location
+        const searchResults = await ApiService.searchLocations(
+          destinationText,
+          userLocation?.latitude,
+          userLocation?.longitude
+        );
+        
+        // If we found any results, get details for the first one
+        if (searchResults && searchResults.length > 0) {
+          const firstResult = searchResults[0];
+          console.log("📍 Found location match:", firstResult.place);
+          
+          // Get complete details including coordinates
+          const details = await ApiService.getPlaceDetails(firstResult.id);
+          
+          if (details && details.latitude && details.longitude) {
+            console.log("📍 Geocoded coordinates:", {
+              lat: details.latitude,
+              lng: details.longitude
+            });
+            
+            // Call the parent with the geocoded location
+            if (onLocationSelect) {
+              onLocationSelect(
+                details.place,
+                currentLocationText.trim() || 'Current Position',
+                details, // Now we have coordinates!
+                undefined
+              );
+            }
+            
+            setIsLoading(false);
+            return;
+          }
+        }
+        
+        // If we couldn't find coordinates, notify the user
+        console.log("⚠️ Could not find coordinates for:", destinationText);
+        
+        // Still call onLocationSelect with the text but no coordinates
+        if (onLocationSelect) {
+          onLocationSelect(
+            destinationText.trim(),
+            currentLocationText.trim() || 'Current Position',
+            undefined,
+            undefined
+          );
+        }
+      }
+    } catch (error) {
+      console.error("❌ Error geocoding text input:", error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleBackPress = () => {
+    // Clear all search state
     setIsConfirmed(false);
     setIsExpanded(false);
     setShowRecommendations(false);
     setSearchQuery('');
     setSearchResults([]);
+    
+    // Explicitly clear the destination
+    setDestinationText('');
+    
+    // Close keyboard
     Keyboard.dismiss();
+    
+    // Call parent's clear callback to remove marker and polyline
+    if (onClear) {
+      console.log("🧹 Clearing map elements via parent callback");
+      onClear();
+    }
   };
+
+  const handleSearchResultSelect = async (item: LocationData) => {
+    try {
+      // Show loading state
+      setIsLoading(true);
+      
+      // Store which input is being filled
+      const isDestination = isDestinationFocused;
+      
+      // Get complete location details including coordinates
+      const details = await ApiService.getPlaceDetails(item.id);
+      
+      if (!details) {
+        console.error('Could not get location details');
+        return;
+      }
+      
+      console.log('📍 Got location details:', details);
+      
+      // Update the text field with the full place name from the API
+      if (isDestination) {
+        setDestinationText(details.place);
+      } else {
+        setCurrentLocationText(details.place);
+      }
+      
+      // Clear search
+      setSearchQuery('');
+      setSearchResults([]);
+      
+      // Dismiss keyboard
+      Keyboard.dismiss();
+      
+      // Close recommendations
+      setShowRecommendations(false);
+      
+      // Auto-collapse the search bar if it's a destination
+      if (isDestination) {
+        setIsExpanded(false);
+      }
+      
+      // Set confirmed to prevent auto-collapsing
+      setIsConfirmed(true);
+      
+      // Immediately call parent component with location details
+      if (onLocationSelect) {
+        onLocationSelect(
+          details.place,
+          isDestination ? currentLocationText : details.place,
+          isDestination ? details : undefined,
+          isDestination ? undefined : details
+        );
+      }
+    } catch (error) {
+      console.error('Error in handleSearchResultSelect:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add this function to handle Enter key press
+  const handleSubmitEditing = () => {
+    if (destinationText.trim() !== '') {
+      handleConfirm();
+    }
+  };
+
+  // Add this effect to auto-confirm after editing is done
+  useEffect(() => {
+    if (!isDestinationFocused && destinationText.trim() !== '' && !isConfirmed) {
+      // User finished editing but didn't select a result or press enter
+      // Wait a moment and then try to geocode
+      const timer = setTimeout(() => {
+        if (!isConfirmed && !isDestinationFocused && destinationText.trim() !== '') {
+          console.log("🔄 Auto-confirming after editing");
+          handleConfirm();
+        }
+      }, 1500); // 1.5 seconds after editing
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isDestinationFocused, destinationText, isConfirmed]);
 
   return (
     <KeyboardAvoidingView 
@@ -316,6 +463,8 @@ const SearchBar: React.FC<SearchBarProps> = ({
               value={destinationText}
               onChangeText={handleDestinationChange}
               onFocus={handleDestinationFocus}
+              onSubmitEditing={handleSubmitEditing}
+              returnKeyType="search"
               onBlur={() => {
                 setIsDestinationFocused(false);
                 handleBlur();
@@ -354,16 +503,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
         </Animated.View>
       </Pressable>
 
-      {/* Confirm button - only visible when expanded but not confirmed */}
-      {isExpanded && (
-        <TouchableOpacity 
-          style={styles.confirmButton}
-          onPress={handleConfirm}
-        >
-          <Text style={styles.confirmButtonText}>Confirm</Text>
-        </TouchableOpacity>
-      )}
-
       {/* Places Autocomplete Results */}
       {(showRecommendations && isExpanded) && (
         <View style={styles.recommendationsContainer}>
@@ -385,7 +524,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
               renderItem={({ item }) => (
                 <TouchableOpacity 
                   style={styles.recommendationItem}
-                  onPress={() => handleLocationSelect(item)}
+                  onPress={() => handleSearchResultSelect(item)}
                 >
                   <Ionicons 
                     name="navigate-outline" 
@@ -459,23 +598,6 @@ const styles = StyleSheet.create({
   },
   searchIcon: {
     marginRight: 15,
-  },
-  confirmButton: {
-    backgroundColor: '#2089dc',
-    borderRadius: 20,
-    padding: 12,
-    marginTop: 10,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  confirmButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
   },
   recommendationsContainer: {
     marginTop: 10,

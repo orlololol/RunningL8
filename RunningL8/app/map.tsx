@@ -19,16 +19,15 @@ const UPDATE_INTERVAL = 5000;
 export default function App() {
   const [location, setLocation] = useState<Location.LocationObjectCoords | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [destination, setDestination] = useState<string | null>(null);
-  const [currentLocation, setCurrentLocation] = useState<string | null>(null);
+  const [destinationText, setDestinationText] = useState<string | null>(null);
+  const [currentLocationText, setCurrentLocationText] = useState<string>("Current Position");
   const [showEtaPanel, setShowEtaPanel] = useState(false);
   const [routeData, setRouteData] = useState<RouteData | null>(null);
-  //const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
-  const [markerLocation, setMarkerLocation] = useState<{latitude: number, longitude: number} | null>(null);
-  
-  // Store actual location coordinates for destination and current location
-  const [destinationCoords, setDestinationCoords] = useState<{latitude: number, longitude: number} | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
   const [startCoords, setStartCoords] = useState<{latitude: number, longitude: number} | null>(null);
   
   // Navigation mode states
@@ -45,6 +44,21 @@ export default function App() {
   const startTimeRef = useRef<number | null>(null);
   const watchPositionSubscription = useRef<Location.LocationSubscription | null>(null);
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Add this to your state variables at the top of the component
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Add this to your state in map.tsx
+  const [recentLocations, setRecentLocations] = useState<Array<{
+    timestamp: number;
+    coords: {latitude: number; longitude: number}
+  }>>([]);
+  
+  // Add this to store recent pace readings for smoothing
+  const [recentPaceReadings, setRecentPaceReadings] = useState<number[]>([]);
+  
+  // Add this state to store the last valid pace value
+  const [lastValidPace, setLastValidPace] = useState<string | null>(null);
   
   useEffect(() => {
     let isMounted = true;
@@ -91,28 +105,41 @@ export default function App() {
 
   const handleMapPress = (event: MapPressEvent) => {
     const { coordinate } = event.nativeEvent;
-    console.log("🖱️ Map pressed at:", coordinate);
     
-    // Clear previous marker and route data
-    setDestinationCoords(null);
-    setRouteCoordinates([]);
-    setRouteData(null);
+    // Set the destination coordinates immediately (no temporary marker)
+    setDestinationCoords(coordinate);
     
-    // Set new marker
-    setMarkerLocation(coordinate);
+    // Update destination text with coordinates in a clear format for display
+    const coordString = `Location (${coordinate.latitude.toFixed(5)}, ${coordinate.longitude.toFixed(5)})`;
+    setDestinationText(coordString);
+    
+    // If we have current location, fetch the route immediately
+    if (location) {
+      fetchRouteData(
+        location.latitude,
+        location.longitude,
+        coordinate.latitude,
+        coordinate.longitude
+      );
+    }
+    
+    // Close any expanded UI elements
+    if (showEtaPanel) {
+      setShowEtaPanel(false);
+    }
   };
 
   const handleMarkerPress = () => {
-    setMarkerLocation(null);
+    setDestinationCoords(null);
   };
 
   const handleBottomButtonPress = () => {
     console.log("👍 Continue button pressed");
     
     // If marker location exists, use it to set destination
-    if (markerLocation && location) {
+    if (destinationCoords && location) {
       // Set destination coordinates - this will be used for the red marker
-      setDestinationCoords(markerLocation);
+      setDestinationCoords(destinationCoords);
       
       // Set start coordinates from current location
       setStartCoords({
@@ -120,19 +147,15 @@ export default function App() {
         longitude: location.longitude
       });
       
-      // Clear the marker now that we have set destination coords
-      // This prevents having both a temp marker and destination marker
-      setMarkerLocation(null);
-      
-      console.log("📍 Set destination at:", markerLocation);
+      console.log("�� Set destination at:", destinationCoords);
       
       // Fetch route between current location and selected marker
       console.log("🔄 Fetching route data...");
       fetchRouteData(
         location.latitude,
         location.longitude,
-        markerLocation.latitude,
-        markerLocation.longitude
+        destinationCoords.latitude,
+        destinationCoords.longitude
       );
       
       setShowEtaPanel(true);
@@ -187,92 +210,70 @@ export default function App() {
   
   // Fetch route data from API
   const fetchRouteData = async (startLat: number, startLng: number, endLat: number, endLng: number) => {
-    console.log("🚶‍♂️ fetchRouteData called with coordinates:");
-    console.log(`- Start: ${startLat}, ${startLng}`);
-    console.log(`- End: ${endLat}, ${endLng}`);
-    
-    // Clear any previous route
-    setRouteCoordinates([]);
+    console.log("🔍 Fetching route from", { startLat, startLng }, "to", { endLat, endLng });
     
     try {
-      // Create route request
+      // Show loading state
+      setIsLoading(true);
+      
       const routeRequest = {
         currentLat: startLat,
         currentLng: startLng,
         destinationLat: endLat,
-        destinationLng: endLng
+        destinationLng: endLng,
       };
       
-      console.log("📤 Requesting route with data:", JSON.stringify(routeRequest, null, 2));
+      // Get route data from the API
+      const data = await ApiService.getGenericRoute(routeRequest);
+      console.log("✅ Route data received:", data);
       
-      // Add a timeout promise to prevent long-hanging requests
-      const timeoutPromise = new Promise<RouteData>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error("API request timed out after 10 seconds"));
-        }, 10000);
-      });
-      
-      // Race the actual API call against the timeout
-      const data = await Promise.race([
-        ApiService.getGenericRoute(routeRequest),
-        timeoutPromise
-      ]);
-      
-      console.log("✅ Successfully received route data"); 
+      // Set the route data for rendering
       setRouteData(data);
       
-      if (data && data.polyline) {
-        try {
-          console.log("📐 Decoding polyline...");
-          const decodedCoords = decodePolyline(data.polyline);
-          
-          if (decodedCoords && decodedCoords.length > 0) {
-            console.log("✅ Setting route coordinates from polyline, points:", decodedCoords.length);
-            setRouteCoordinates(decodedCoords);
-            return;
-          } else {
-            console.warn("⚠️ Decoded polyline had no points");
-          }
-        } catch (err) {
-          console.error("❌ Error decoding polyline:", err);
-        }
+      // Update route coordinates for display
+      if (data.polyline) {
+        const decodedCoords = decodePolyline(data.polyline);
+        setRouteCoordinates(decodedCoords);
       } else {
-        console.warn("⚠️ No polyline in response data");
+        // Create a fallback route if no polyline is available
+        const fakeCoords = createFakeRoutePath(
+          { latitude: startLat, longitude: startLng },
+          { latitude: endLat, longitude: endLng }
+        );
+        setRouteCoordinates(fakeCoords);
       }
       
-      // Fall back to fake route
-      console.log("🛣️ Using fake route as fallback");
-      const fakeRoute = createFakeRoutePath(
+      // Show the ETA panel with route info
+      setShowEtaPanel(true);
+      
+      return data;
+    } catch (error) {
+      console.error("❌ Error fetching route:", error);
+      
+      // Create fallback data with a straight line
+      const fakeRoutePath = createFakeRoutePath(
         { latitude: startLat, longitude: startLng },
         { latitude: endLat, longitude: endLng }
       );
-      setRouteCoordinates(fakeRoute);
       
-    } catch (error: any) {
-      console.error("❌ Error in fetchRouteData:", error);
-      console.error("❌ Error message:", error.message);
+      // Create a proper RouteData object that matches the interface
+      const fakeRouteData: RouteData = {
+        distance: calculateDistance(startLat, startLng, endLat, endLng),
+        duration: 30, // Default 30 minutes
+        polyline: '', // Empty polyline
+        startLocation: { latitude: startLat, longitude: startLng },
+        endLocation: { latitude: endLat, longitude: endLng },
+      };
       
-      // Always provide a route visualization
-      console.log("🛣️ Creating fake route path due to error");
-      const fakeRoute = createFakeRoutePath(
-        { latitude: startLat, longitude: startLng },
-        { latitude: endLat, longitude: endLng }
-      );
+      setRouteData(fakeRouteData);
+      setRouteCoordinates(fakeRoutePath);
       
-      setRouteCoordinates(fakeRoute);
+      // Still show the ETA panel with the approximate info
+      setShowEtaPanel(true);
       
-      // If we don't have route data, create default data
-      if (!routeData) {
-        const defaultRouteData = {
-          distance: calculateDistance(startLat, startLng, endLat, endLng),
-          duration: 30, // Default 30 min
-          polyline: '',
-          startLocation: { latitude: startLat, longitude: startLng },
-          endLocation: { latitude: endLat, longitude: endLng }
-        };
-        
-        setRouteData(defaultRouteData);
-      }
+      return fakeRouteData;
+    } finally {
+      setIsLoading(false);
     }
   };
   
@@ -308,8 +309,9 @@ export default function App() {
   };
   
   // Calculate distance between two coordinates using Haversine formula
+  // Now returns distance in METERS for higher precision
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371; // Earth's radius in km
+    const R = 6371000; // Earth's radius in METERS (not km)
     const dLat = deg2rad(lat2 - lat1);
     const dLon = deg2rad(lon2 - lon1);
     const a =
@@ -317,8 +319,8 @@ export default function App() {
       Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c; // Distance in km
-    return Math.round(distance * 10) / 10; // Round to 1 decimal place
+    const distanceMeters = R * c; // Distance in meters
+    return distanceMeters;
   };
   
   const deg2rad = (deg: number): number => {
@@ -333,45 +335,42 @@ export default function App() {
   ) => {
     console.log("🔍 Location selected from search:", {
       destination,
-      destinationDetails: destinationDetails ? 
-        `${destinationDetails.place} (${destinationDetails.latitude}, ${destinationDetails.longitude})` : 
-        'undefined',
+      destinationDetails,
       originLocation,
-      originDetails: originDetails ? 
-        `${originDetails.place} (${originDetails.latitude}, ${originDetails.longitude})` : 
-        'undefined'
+      originDetails
     });
     
-    setDestination(destination);
-    setCurrentLocation(originLocation);
+    setDestinationText(destination);
+    setCurrentLocationText(originLocation);
     
-    // Always clear any temporary marker when selecting from search
-    setMarkerLocation(null);
-    
-    // If no coordinates are provided, do nothing else
-    if (!destinationDetails?.latitude && !originDetails?.latitude) {
-      console.log("⚠️ No coordinates provided in search selection");
-      return;
-    }
-    
-    // If we received destination details with coordinates, update destination marker
-    if (destinationDetails?.latitude && destinationDetails?.longitude) {
+    // No more temporary markers - directly set destination coords
+    if (destinationDetails && destinationDetails.latitude && destinationDetails.longitude) {
       const coords = {
         latitude: destinationDetails.latitude,
         longitude: destinationDetails.longitude
       };
       
-      console.log("📍 Setting destination marker from search at:", coords);
+      // Set the destination marker
       setDestinationCoords(coords);
+      
+      // Fetch the route if we have current location
+      if (location) {
+        fetchRouteData(
+          location.latitude,
+          location.longitude,
+          coords.latitude,
+          coords.longitude
+        );
+      }
     }
     
-    // Set origin coordinates (from either location details or current GPS position)
+    // Set origin coordinates (either from location details or current GPS position)
     if (originDetails?.latitude && originDetails?.longitude) {
       setStartCoords({
         latitude: originDetails.latitude,
         longitude: originDetails.longitude
       });
-      console.log("📍 Set origin from search selection:", originDetails.place);
+      console.log("📍 Set origin from search selection:", originDetails);
     } else if (location && originLocation === 'Current Position') {
       setStartCoords({
         latitude: location.latitude,
@@ -380,42 +379,8 @@ export default function App() {
       console.log("📍 Set origin from current GPS position");
     }
     
-    // IMMEDIATE ROUTE GENERATION:
-    // If we have both coordinates, fetch the route immediately
-    if (destinationDetails?.latitude && destinationDetails?.longitude) {
-      const startLat = originDetails?.latitude || location?.latitude || 0;
-      const startLng = originDetails?.longitude || location?.longitude || 0;
-      const destLat = destinationDetails.latitude;
-      const destLng = destinationDetails.longitude;
-      
-      if (startLat !== 0 && startLng !== 0) {
-        console.log("🛣️ Immediately fetching route between:", 
-          { start: {lat: startLat, lng: startLng}, 
-            dest: {lat: destLat, lng: destLng} });
-        
-        // Immediately fetch route without waiting for Confirm button
-        await fetchRouteData(startLat, startLng, destLat, destLng);
-        
-        // Move map to show both points
-        if (mapRef.current) {
-          // Calculate region that includes both points
-          const region = {
-            latitude: (startLat + destLat) / 2,
-            longitude: (startLng + destLng) / 2,
-            latitudeDelta: Math.abs(startLat - destLat) * 1.5 + 0.02,
-            longitudeDelta: Math.abs(startLng - destLng) * 1.5 + 0.02
-          };
-          
-          console.log("🗺️ Animating map to show route");
-          mapRef.current.animateToRegion(region, 1000);
-        }
-        
-        // Show the ETA panel
-        setShowEtaPanel(true);
-      } else {
-        console.warn("⚠️ Missing start coordinates, cannot generate route");
-      }
-    }
+    // Show the ETA panel
+    setShowEtaPanel(true);
   };
 
   const handleCloseEtaPanel = () => {
@@ -427,21 +392,40 @@ export default function App() {
     setIsNavigating(true);
     setShowEtaPanel(false);
     
-    // Initialize navigation data
+    // Set default values for navigation data - use a default pace instead of "--:-- min/km"
+    const defaultPace = "8:00 min/km";
+    setPace(defaultPace);
+    setLastValidPace(defaultPace); // Initialize with a default pace
+    setEta("--:--");
+    
+    // Initialize navigation data with current location
     if (location) {
+      console.log("🏁 Starting navigation from current position");
+      
+      // Clear any previous path data
       setTraveledPathCoordinates([{
         latitude: location.latitude,
         longitude: location.longitude
       }]);
+      
+      // Reset all time-tracking
+      startTimeRef.current = Date.now();
+      setElapsedTime(0);
     }
     
     // Set initial distance left
     if (routeData?.distance) {
       setDistanceLeft(routeData.distance);
+      console.log(`📏 Initial distance: ${routeData.distance} km`);
     }
     
-    // Start tracking
+    // Start location tracking
     startLocationTracking();
+    
+    // Force an immediate update of the navigation data
+    setTimeout(() => {
+      updateNavigationData();
+    }, 500);
   };
   
   // Handle pause navigation
@@ -464,6 +448,15 @@ export default function App() {
     // Clear all the navigation state
     stopLocationTracking();
     startTimeRef.current = null;
+    
+    // Reset pace values
+    setPace("--:-- min/km");
+    setLastValidPace(null);
+    
+    // Clear destination marker and route polyline
+    setDestinationCoords(null);
+    setRouteCoordinates([]);
+    setRouteData(null);
     
     // Reset map zoom
     if (mapRef.current && location) {
@@ -497,29 +490,99 @@ export default function App() {
         return;
       }
       
-      // Start tracking location with high accuracy
+      // Clear recent pace readings when starting new tracking
+      setRecentPaceReadings([]);
+      console.log("🔍 Starting high-density location tracking (10 points/second)");
+      
+      // Initialize traveledPathCoordinates with current location
+      if (location && isNavigating) {
+        console.log(`🧭 Initializing path with current location: ${location.latitude}, ${location.longitude}`);
+        setTraveledPathCoordinates([{
+          latitude: location.latitude,
+          longitude: location.longitude
+        }]);
+        
+        // Initialize recent locations with current location
+        setRecentLocations([{
+          timestamp: Date.now(),
+          coords: {
+            latitude: location.latitude,
+            longitude: location.longitude
+          }
+        }]);
+      }
+      
+      // Start tracking location with high accuracy and increased frequency
       watchPositionSubscription.current = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 1000,
-          distanceInterval: 1,
+          accuracy: Location.Accuracy.BestForNavigation, // Highest possible accuracy
+          timeInterval: 100,  // Update 10 times per second
+          distanceInterval: 0.05, // Update with extremely tiny movements (5cm)
         },
         (newLocation) => {
           if (isNavigating && !isPaused) {
-            // Add new point to traveled path
-            setTraveledPathCoordinates(prevPath => [
-              ...prevPath,
-              {
-                latitude: newLocation.coords.latitude,
-                longitude: newLocation.coords.longitude
-              }
-            ]);
+            const coords = newLocation.coords;
+            const now = Date.now();
+            console.log(`📍 New location at ${now % 10000}: ${coords.latitude.toFixed(8)}, ${coords.longitude.toFixed(8)}, accuracy: ${coords.accuracy}m`);
             
-            // Update navigation data
-            updateNavigationData();
+            // Add to recent locations window (keep more points for better responsiveness)
+            setRecentLocations(prev => {
+              // Keep only locations from last 15 seconds
+              const recent = prev.filter(loc => now - loc.timestamp < 15000);
+              // Add new location
+              const updated = [...recent, {
+                timestamp: now,
+                coords: {
+                  latitude: coords.latitude,
+                  longitude: coords.longitude
+                }
+              }];
+              
+              console.log(`📊 Recent locations buffer: ${updated.length} points in last 15s`);
+              return updated;
+            });
+            
+            // Check if the new location is different
+            const lastPath = traveledPathCoordinates[traveledPathCoordinates.length - 1];
+            const distanceMoved = lastPath ? calculateDistance(
+              lastPath.latitude, 
+              lastPath.longitude,
+              coords.latitude,
+              coords.longitude
+            ) : 0;
+            
+            console.log(`📏 Distance moved since last point: ${distanceMoved.toFixed(2)}m`);
+            
+            // Add new point with an even lower threshold to capture more movement data
+            if (!lastPath || distanceMoved > 0.05) { // 5cm threshold - more aggressive
+              // Add new point to traveled path
+              setTraveledPathCoordinates(prevPath => {
+                const newPath = [
+                  ...prevPath,
+                  {
+                    latitude: coords.latitude,
+                    longitude: coords.longitude
+                  }
+                ];
+                console.log(`🛣️ Path updated: ${newPath.length} points total (${(newPath.length / (elapsedTime || 1)).toFixed(1)} pts/sec)`);
+                return newPath;
+              });
+              
+              // Force a navigation data update with each significant new point
+              updateNavigationData();
+            }
           }
         }
       );
+      
+      // Also set up a regular interval to ensure the UI updates even if location doesn't change
+      updateIntervalRef.current = setInterval(() => {
+        if (isNavigating && !isPaused) {
+          console.log(`⏱️ Periodic update triggered`);
+          updateNavigationData();
+        }
+      }, 500); // Update every half second
+      
     } catch (error) {
       setErrorMsg(`Error tracking location: ${(error as Error).message}`);
     }
@@ -538,67 +601,174 @@ export default function App() {
     }
   };
 
+  // Update the pace calculation to use a simple point-to-point approach
+  const calculateRecentPace = () => {
+    // Need at least 2 points to calculate pace
+    if (recentLocations.length < 2) {
+      console.log(`⚠️ Need at least 2 points, using default pace`);
+      return 8; // Default pace of 8 min/km (walking pace)
+    }
+    
+    // Sort by timestamp ascending to get the newest points
+    const sortedLocations = [...recentLocations].sort((a, b) => a.timestamp - b.timestamp);
+    
+    // Use the most recent two points
+    const currentPoint = sortedLocations[sortedLocations.length - 1];
+    const previousPoint = sortedLocations[sortedLocations.length - 2];
+    
+    // Calculate distance between two points
+    const distanceMeters = calculateDistance(
+      previousPoint.coords.latitude, previousPoint.coords.longitude,
+      currentPoint.coords.latitude, currentPoint.coords.longitude
+    );
+
+    // Get time difference in minutes
+    const timeSpanMinutes = (currentPoint.timestamp - previousPoint.timestamp) / 60000;
+
+    // Calculate pace (minutes per km)
+    const distanceKm = distanceMeters / 1000;
+    const pace = timeSpanMinutes / distanceKm;
+    
+    // Log details for debugging
+    console.log(`📏 Point-to-point distance: ${distanceMeters.toFixed(2)}m`);
+    console.log(`⏱️ Time between points: ${(timeSpanMinutes * 60).toFixed(1)} seconds`);
+    
+    // If we moved a meaningful distance, calculate accurate pace
+    if (distanceMeters > 0.1) { // 10cm minimum threshold
+      // Calculate pace (minutes per km)
+      const distanceKm = distanceMeters / 1000;
+      const pace = timeSpanMinutes / distanceKm;
+      console.log(`🏃‍♂️ Direct pace calculation: ${pace.toFixed(2)} min/km`);
+      return pace;
+    }
+    
+    // If we didn't move much but have a previous valid pace, maintain it
+    if (lastValidPace) {
+      // Extract numeric value from the pace string (e.g. "8:30 min/km" → 8.5)
+      const paceParts = lastValidPace.split(':');
+      const minutes = parseInt(paceParts[0]);
+      const seconds = parseInt(paceParts[1]);
+      const numericPace = minutes + (seconds / 60);
+      console.log(`🏃‍♂️ Using extracted numeric pace from last valid: ${numericPace.toFixed(2)} min/km`);
+      return numericPace;
+    }
+    
+    // Fall back to default pace
+    console.log(`🏃‍♂️ Using default pace`);
+    return 8; // Default 8 min/km
+  }
+
   // Update navigation information like distance left, pace, etc.
   const updateNavigationData = () => {
-    // Only update if we have location and we're navigating
-    if (!location || !isNavigating || !routeData) return;
+    console.log(`🔄 Navigation data update triggered`);
     
-    // Calculate distance left
+    // Only update if we have location and we're navigating
+    if (!location || !isNavigating || !routeData) {
+      console.log(`⚠️ Skipping navigation update - missing data`);
+      return;
+    }
+    
+    // Calculate distance left in kilometers (for display)
     if (destinationCoords) {
-      const distanceToDestination = calculateDistance(
+      const distanceToDestinationMeters = calculateDistance(
         location.latitude,
         location.longitude,
         destinationCoords.latitude,
         destinationCoords.longitude
       );
       
-      setDistanceLeft(distanceToDestination);
+      // Convert to kilometers for display
+      const distanceToDestinationKm = distanceToDestinationMeters / 1000;
       
-      // Calculate pace (if we've been moving for at least 1 minute)
-      if (elapsedTime > 60 && traveledPathCoordinates.length > 1) {
-        // Calculate total distance traveled
-        let totalDistance = 0;
+      // Round to 1 decimal place for display
+      setDistanceLeft(Math.round(distanceToDestinationKm * 10) / 10);
+      
+      // Calculate total distance traveled (in meters for precision)
+      let totalDistanceMeters = 0;
+      
+      // Only calculate if we have at least 2 points
+      if (traveledPathCoordinates.length > 1) {
         for (let i = 1; i < traveledPathCoordinates.length; i++) {
           const prev = traveledPathCoordinates[i - 1];
           const curr = traveledPathCoordinates[i];
           
-          totalDistance += calculateDistance(
+          const segmentDistanceMeters = calculateDistance(
             prev.latitude,
             prev.longitude,
             curr.latitude,
             curr.longitude
           );
-        }
-        
-        // Calculate pace in minutes per km
-        const paceMinPerKm = totalDistance > 0 ? (elapsedTime / 60) / totalDistance : 0;
-        const paceMinutes = Math.floor(paceMinPerKm);
-        const paceSeconds = Math.floor((paceMinPerKm - paceMinutes) * 60);
-        
-        setPace(`${paceMinutes}:${paceSeconds.toString().padStart(2, '0')} min/km`);
-        
-        // Estimate ETA
-        if (paceMinPerKm > 0) {
-          const timeToDestinationMinutes = distanceToDestination * paceMinPerKm;
-          const etaTimestamp = Date.now() + timeToDestinationMinutes * 60 * 1000;
-          const etaDate = new Date(etaTimestamp);
           
-          // Format as HH:MM
-          const hours = etaDate.getHours();
-          const minutes = etaDate.getMinutes();
-          setEta(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`);
+          // Use an even lower threshold to detect very small movements
+          if (segmentDistanceMeters > 0.01) { // 1cm threshold
+            totalDistanceMeters += segmentDistanceMeters;
+          }
         }
+        
+        console.log(`📊 Total distance traveled: ${totalDistanceMeters.toFixed(1)}m (${(totalDistanceMeters/1000).toFixed(3)}km) over ${traveledPathCoordinates.length} points`);
+      }
+      
+      // Calculate recent pace - this will always return a value now
+      const recentPaceValue = calculateRecentPace();
+      
+      // Add to recent pace readings (keep last 3 readings for smoothing)
+      setRecentPaceReadings(prev => {
+        const newReadings = [...prev, recentPaceValue].slice(-3);
+        console.log(`🏃‍♂️ Pace readings buffer: ${newReadings.length} readings`);
+        return newReadings;
+      });
+      
+      // Apply smoothing by averaging the last few pace readings (if available)
+      const smoothedPace = recentPaceReadings.length > 0 
+        ? recentPaceReadings.reduce((sum, val) => sum + val, recentPaceValue) / (recentPaceReadings.length + 1)
+        : recentPaceValue;
+      
+      // Format pace as MM:SS
+      const paceMinutes = Math.floor(smoothedPace);
+      const paceSeconds = Math.floor((smoothedPace - paceMinutes) * 60);
+      
+      const paceString = `${paceMinutes}:${paceSeconds.toString().padStart(2, '0')} min/km`;
+      console.log(`🏃‍♂️ Setting pace: ${paceString}`);
+      
+      // Store this as the last valid pace value
+      setLastValidPace(paceString);
+      // Always update the current pace
+      setPace(paceString);
+      
+      // Estimate ETA based on smoothed pace
+      if (smoothedPace > 0) {
+        const timeToDestinationMinutes = (distanceToDestinationMeters / 1000) * smoothedPace;
+        const etaTimestamp = Date.now() + timeToDestinationMinutes * 60 * 1000;
+        const etaDate = new Date(etaTimestamp);
+        
+        // Format as HH:MM
+        const hours = etaDate.getHours();
+        const minutes = etaDate.getMinutes();
+        setEta(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`);
       }
     }
   };
 
-  // Add this useEffect to ensure markers behave correctly
-  useEffect(() => {
-    // If we have a destination marker, always clear the temporary marker
-    if (destinationCoords) {
-      setMarkerLocation(null);
+  // Add a new clearMapElements function to handle clearing the map
+  const clearMapElements = () => {
+    setDestinationCoords(null);
+    setRouteData(null);
+    setShowEtaPanel(false);
+  };
+
+  // Add this function to handle map region changes if you want to 
+  // fetch addresses for the center of the map as it moves
+  const handleMapRegionChangeComplete = async (region: Region) => {
+    // Add this flag to track if user moved the map
+    const userMovedMap = true; // You should have some logic to determine this
+    
+    // Only trigger reverse geocoding if the map was moved by user
+    // and not as a result of setting a destination
+    if (userMovedMap && region.latitude !== 0 && region.longitude !== 0) {
+      // You could implement reverse geocoding here
+      console.log("Map region changed to:", region);
     }
-  }, [destinationCoords]);
+  };
 
   if (errorMsg) {
     return (
@@ -633,23 +803,12 @@ export default function App() {
         onPress={handleMapPress}
         moveOnMarkerPress={false}
       >
-        {/* Only show temporary marker if no destination set */}
-        {markerLocation && !destinationCoords && (
-          <Marker
-            coordinate={markerLocation}
-            onPress={handleMarkerPress}
-            title="Selected Location"
-            description="Tap to remove"
-            pinColor="#FFA500" // Orange for temporary marker
-          />
-        )}
-        
-        {/* Destination marker always has priority and is always red */}
+        {/* Destination marker - red and takes priority */}
         {destinationCoords && (
           <Marker
             coordinate={destinationCoords}
-            title={destination || 'Destination'}
-            pinColor="#FF6B6B" // Always red for destination
+            pinColor="red" // Always use red for the destination
+            title="Destination"
           />
         )}
         
@@ -674,30 +833,20 @@ export default function App() {
         )}
       </MapView>
       
-      {markerLocation && (
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity 
-            style={styles.button}
-            onPress={handleBottomButtonPress}
-          >
-            <Text style={styles.buttonText}>Continue</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      
       {/* Only show the search bar when not navigating */}
       {!isNavigating && (
         <SearchBar 
           onLocationSelect={handleLocationSelect}
-          userLocation={location}
+          userLocation={location ? { latitude: location.latitude, longitude: location.longitude } : null}
+          onClear={clearMapElements}
         />
       )}
       
       {/* Planning ETA Panel */}
       <EtaPanel 
         visible={showEtaPanel}
-        destination={destination || undefined}
-        currentLocation={currentLocation || undefined}
+        destination={destinationText || undefined}
+        currentLocation={currentLocationText || undefined}
         distance={routeData?.distance || undefined}
         onClose={handleCloseEtaPanel}
         // Add a prop for the start navigation button
@@ -708,8 +857,8 @@ export default function App() {
       {isNavigating && (
         <NavigationPanel
           visible={true}
-          destination={destination || 'Destination'}
-          currentLocation={currentLocation || 'Current Position'}
+          destination={destinationText || 'Destination'}
+          currentLocation={currentLocationText || 'Current Position'}
           distance={routeData?.distance || 0}
           distanceLeft={distanceLeft}
           pace={pace}
@@ -776,5 +925,19 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: '600',
+  },
+  currentLocationMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(33, 150, 243, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  currentLocationDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#2196F3',
   },
 });

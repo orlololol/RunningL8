@@ -43,7 +43,7 @@ const EtaPanel: React.FC<EtaPanelProps> = ({
   const [panelPosition, setPanelPosition] = useState(PANEL_POSITIONS.HALF);
   
   // Example data - in a real app these would be calculated based on real data from API
-  const avgSpeed = 20; // km/h
+  const avgSpeed = 8; // km/h
   const calculatedEta = Math.round((distance / avgSpeed) * 60); // in minutes
   const requiredSpeed = customEta ? Math.round((distance / (parseInt(customEta) / 60)) * 10) / 10 : 0;
   

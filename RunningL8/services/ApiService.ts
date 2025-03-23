@@ -336,7 +336,7 @@ const apiService = {
       
       // Add location bias if coordinates are available
       if (lat && lng) {
-        url += `&location=${lat},${lng}&radius=50000`; // 50km radius
+        url += `&locationrestriction=circle:10000@${lat},${lng}`; // 50km radius
         console.log("🌎 Using location bias for search:", lat, lng);
       }
       
@@ -388,9 +388,12 @@ const apiService = {
         lng: data.result.geometry?.location?.lng
       });
       
+      // Instead of combining both, prioritize formatted_address if available, or fall back to name
+      let fullPlaceName = data.result.formatted_address || data.result.name || "Selected Location";
+      
       return {
         id: placeId,
-        place: data.result.name || "Selected Location",
+        place: fullPlaceName, // Just use the full formatted address as the place name
         address: data.result.formatted_address || data.result.vicinity || "",
         latitude: data.result.geometry?.location?.lat || 0,
         longitude: data.result.geometry?.location?.lng || 0,
@@ -426,6 +429,41 @@ const apiService = {
     } catch (error) {
       console.error('Error ending run:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Geocode a text address to coordinates directly
+   * This is a backup method if we can't get coordinates from search+details
+   */
+  async geocodeAddress(address: string): Promise<LocationData | null> {
+    try {
+      console.log("🌍 Geocoding address:", address);
+      
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${API_CONFIG.GOOGLE_PLACES_API_KEY}`
+      );
+      
+      const data = await response.json();
+      
+      if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+        console.warn(`Geocoding API error: ${data.status}`);
+        return null;
+      }
+      
+      const result = data.results[0];
+      console.log("📍 Geocoded result:", result.formatted_address);
+      
+      return {
+        id: result.place_id || `geocoded-${Date.now()}`,
+        place: result.formatted_address.split(',')[0] || address,
+        address: result.formatted_address,
+        latitude: result.geometry?.location?.lat || 0,
+        longitude: result.geometry?.location?.lng || 0,
+      };
+    } catch (error) {
+      console.error('Error geocoding address:', error);
+      return null;
     }
   },
 };
