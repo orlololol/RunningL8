@@ -1,7 +1,7 @@
 # RunningLate
 
 ## Inspiration
-We were initially inspired by a (Reddit post)[https://www.reddit.com/r/Strava/comments/8tmgyh/any_way_to_import_google_maps_gps_history_into/] about importing Google Maps data into Strava, which inspired us to integrate running into a navigation service.
+We were initially inspired by a [Reddit post](https://www.reddit.com/r/Strava/comments/8tmgyh/any_way_to_import_google_maps_gps_history_into/) about importing Google Maps data into Strava, which inspired us to integrate running into a navigation service.
 
 ## What it does
 It uses your current location data, the destination address and your _Arrive By_ time to computes a pace that you must match to reach your destination on time. It provides real time pace and information on whether you need to speed up or not.
